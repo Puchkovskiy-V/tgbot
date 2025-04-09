@@ -45,39 +45,25 @@ OPTIONS = {
 }
 
 def init_db():
-    """Инициализация базы данных с проверкой существующих таблиц"""
+    """Инициализация базы данных"""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
-        
-        # Проверяем существование таблицы users
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-        if not cursor.fetchone():
-            cursor.execute("""
-                CREATE TABLE users (
-                    user_id INTEGER PRIMARY KEY,
-                    username TEXT,
-                    used_options TEXT DEFAULT '[]',
-                    all_used INTEGER DEFAULT 0
-                )
-            """)
-        else:
-            # Проверяем наличие колонки username
-            cursor.execute("PRAGMA table_info(users)")
-            columns = [column[1] for column in cursor.fetchall()]
-            if 'username' not in columns:
-                cursor.execute("ALTER TABLE users ADD COLUMN username TEXT")
-        
-        # Проверяем существование таблицы stats
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='stats'")
-        if not cursor.fetchone():
-            cursor.execute("""
-                CREATE TABLE stats (
-                    user_id INTEGER,
-                    option TEXT,
-                    count INTEGER DEFAULT 0,
-                    PRIMARY KEY (user_id, option)
-                )
-            """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                used_options TEXT DEFAULT '[]',
+                all_used INTEGER DEFAULT 0
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS stats (
+                user_id INTEGER,
+                option TEXT,
+                count INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, option)
+            )
+        """)
 
 def get_user_data(user_id):
     with sqlite3.connect(DB_FILE) as conn:
@@ -170,27 +156,36 @@ async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать статистику"""
+    """Показать полную статистику всех вариантов"""
     try:
         user = update.effective_user
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
+            
+            # Получаем ВСЕ варианты с их частотой
             cursor.execute("""
                 SELECT option, count FROM stats 
-                WHERE user_id = ? 
+                WHERE user_id = ?
                 ORDER BY count DESC
-                LIMIT 10
             """, (user.id,))
             stats_data = cursor.fetchall()
+            
+            # Получаем общее количество характеристик
+            cursor.execute("""
+                SELECT SUM(count) FROM stats 
+                WHERE user_id = ?
+            """, (user.id,))
+            total = cursor.fetchone()[0] or 0
         
         if not stats_data:
             await update.message.reply_text("У вас еще нет статистики.")
             return
         
-        response = "📊 <b>Ваша статистика:</b>\n\n"
+        response = f"📊 <b>Полная статистика (всего: {total}):</b>\n\n"
         for idx, (option, count) in enumerate(stats_data, 1):
             emoji = OPTIONS.get(option, "")
-            response += f"{idx}. {emoji} {option}: {count} раз\n"
+            percentage = (count / total) * 100
+            response += f"{idx}. {emoji} <b>{option}</b>: {count} раз ({percentage:.1f}%)\n"
         
         await update.message.reply_text(response, parse_mode='HTML')
     except Exception as e:
@@ -268,20 +263,26 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT option, count FROM stats 
-                    WHERE user_id = ? 
+                    WHERE user_id = ?
                     ORDER BY count DESC
-                    LIMIT 5
                 """, (user.id,))
                 stats_data = cursor.fetchall()
+                
+                cursor.execute("""
+                    SELECT SUM(count) FROM stats 
+                    WHERE user_id = ?
+                """, (user.id,))
+                total = cursor.fetchone()[0] or 0
             
             if not stats_data:
                 await query.edit_message_text("У вас еще нет статистики.")
                 return
             
-            response = "📊 <b>Ваша статистика:</b>\n\n"
+            response = f"📊 <b>Ваша статистика (всего: {total}):</b>\n\n"
             for idx, (option, count) in enumerate(stats_data, 1):
                 emoji = OPTIONS.get(option, "")
-                response += f"{idx}. {emoji} {option}: {count} раз\n"
+                percentage = (count / total) * 100 if total > 0 else 0
+                response += f"{idx}. {emoji} <b>{option}</b>: {count} раз ({percentage:.1f}%)\n"
             
             await query.edit_message_text(response, parse_mode='HTML')
             
@@ -294,7 +295,7 @@ def main():
     init_db()
     
     application = Application.builder() \
-        .token("7031109248:AAF5RIKLWc1uDsDUGLechx1LgocVbJVHU4g") \
+        .token("7031109248:AAEZI7apbMXyEfh7cTQ9KsI5JdFXq0pi8Uw") \
         .build()
     
     # Регистрация обработчиков

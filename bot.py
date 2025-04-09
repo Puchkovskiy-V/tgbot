@@ -83,7 +83,7 @@ def update_user_data(user_id, username, used_options, all_used):
         cursor.execute("""
             INSERT OR REPLACE INTO users (user_id, username, used_options, all_used)
             VALUES (?, ?, ?, ?)
-        """, (user_id, username, json.dumps(used_options), all_used))
+        """, (user_id, username or str(user_id), json.dumps(used_options), all_used))
 
 def update_stats(user_id, option):
     with sqlite3.connect(DB_FILE) as conn:
@@ -156,13 +156,11 @@ async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать полную статистику всех вариантов"""
+    """Показать полную статистику"""
     try:
         user = update.effective_user
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
-            
-            # Получаем ВСЕ варианты с их частотой
             cursor.execute("""
                 SELECT option, count FROM stats 
                 WHERE user_id = ?
@@ -170,21 +168,17 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """, (user.id,))
             stats_data = cursor.fetchall()
             
-            # Получаем общее количество характеристик
-            cursor.execute("""
-                SELECT SUM(count) FROM stats 
-                WHERE user_id = ?
-            """, (user.id,))
+            cursor.execute("SELECT SUM(count) FROM stats WHERE user_id = ?", (user.id,))
             total = cursor.fetchone()[0] or 0
         
         if not stats_data:
             await update.message.reply_text("У вас еще нет статистики.")
             return
         
-        response = f"📊 <b>Полная статистика (всего: {total}):</b>\n\n"
+        response = f"📊 <b>Статистика для {user.mention_html()} (всего: {total}):</b>\n\n"
         for idx, (option, count) in enumerate(stats_data, 1):
             emoji = OPTIONS.get(option, "")
-            percentage = (count / total) * 100
+            percentage = (count / total) * 100 if total > 0 else 0
             response += f"{idx}. {emoji} <b>{option}</b>: {count} раз ({percentage:.1f}%)\n"
         
         await update.message.reply_text(response, parse_mode='HTML')
@@ -203,61 +197,65 @@ async def reset_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Произошла ошибка при сбросе статистики")
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик инлайн-запросов"""
+    """Обработчик инлайн-запросов с уникальными ID"""
     try:
         user = update.inline_query.from_user
+        unique_prefix = f"{user.id}_"
         
-        # Вариант 1: Получить характеристику
-        result1 = InlineQueryResultArticle(
-            id="1",
-            title="🎲 Получить характеристику",
-            description="Нажмите, чтобы получить случайную характеристику",
-            input_message_content=InputTextMessageContent(
-                f"❓ {user.first_name} хочет узнать свою характеристику",
-                parse_mode='HTML'
+        results = [
+            InlineQueryResultArticle(
+                id=f"{unique_prefix}char",
+                title="🎲 Получить характеристику",
+                description="Нажмите, чтобы получить случайную характеристику",
+                input_message_content=InputTextMessageContent(
+                    f"❓ {user.first_name} хочет узнать свою характеристику",
+                    parse_mode='HTML'
+                ),
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("Показать", callback_data=f"char:{user.id}")
+                ]])
             ),
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Показать характеристику", callback_data=f"char:{user.id}")
-            ]])
-        )
-        
-        # Вариант 2: Показать статистику
-        result2 = InlineQueryResultArticle(
-            id="2",
-            title="📊 Моя статистика",
-            description="Показать вашу персональную статистику",
-            input_message_content=InputTextMessageContent(
-                f"📊 {user.first_name} запрашивает статистику",
-                parse_mode='HTML'
-            ),
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Показать статистику", callback_data=f"stats:{user.id}")
-            ]])
-        )
-        
-        await update.inline_query.answer([result1, result2])
+            InlineQueryResultArticle(
+                id=f"{unique_prefix}stats",
+                title="📊 Моя статистика",
+                description="Показать вашу персональную статистику",
+                input_message_content=InputTextMessageContent(
+                    f"📊 {user.first_name} запрашивает статистику",
+                    parse_mode='HTML'
+                ),
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("Показать", callback_data=f"stats:{user.id}")
+                ]])
+            )
+        ]
+        await update.inline_query.answer(results)
     except Exception as e:
         logger.error(f"Error in inline_query: {e}")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик нажатий кнопок"""
+    """Обработчик кнопок с проверкой прав"""
     query = update.callback_query
     await query.answer()
     
     try:
-        user = query.from_user
-        action, user_id = query.data.split(":")
+        action, requested_user_id = query.data.split(":")
+        current_user = query.from_user
         
-        if user.id != int(user_id):
-            await query.edit_message_text("⛔ Это действие доступно только автору запроса")
-            return
-        
-        if action == "char":
-            response = get_random_option(user.id, user.username)
+        # Проверка прав доступа
+        if current_user.id != int(requested_user_id):
             await query.edit_message_text(
-                text=f"🎯 {user.mention_html()}, ты - {response}",
+                "⛔ Доступ запрещен: это не ваш запрос",
+                reply_markup=None
+            )
+            return
+            
+        if action == "char":
+            response = get_random_option(current_user.id, current_user.username)
+            await query.edit_message_text(
+                text=f"🎯 {current_user.mention_html()}, ты - {response}",
                 parse_mode='HTML'
             )
+            
         elif action == "stats":
             with sqlite3.connect(DB_FILE) as conn:
                 cursor = conn.cursor()
@@ -265,20 +263,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     SELECT option, count FROM stats 
                     WHERE user_id = ?
                     ORDER BY count DESC
-                """, (user.id,))
+                """, (current_user.id,))
                 stats_data = cursor.fetchall()
                 
-                cursor.execute("""
-                    SELECT SUM(count) FROM stats 
-                    WHERE user_id = ?
-                """, (user.id,))
+                cursor.execute("SELECT SUM(count) FROM stats WHERE user_id = ?", (current_user.id,))
                 total = cursor.fetchone()[0] or 0
             
             if not stats_data:
                 await query.edit_message_text("У вас еще нет статистики.")
                 return
             
-            response = f"📊 <b>Ваша статистика (всего: {total}):</b>\n\n"
+            response = f"📊 <b>Статистика для {current_user.mention_html()} (всего: {total}):</b>\n\n"
             for idx, (option, count) in enumerate(stats_data, 1):
                 emoji = OPTIONS.get(option, "")
                 percentage = (count / total) * 100 if total > 0 else 0
@@ -288,7 +283,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     except Exception as e:
         logger.error(f"Error in button callback: {e}")
-        await query.edit_message_text("⚠️ Произошла ошибка, попробуйте позже")
+        await query.edit_message_text("⚠️ Произошла ошибка")
 
 def main():
     """Запуск бота"""
@@ -308,10 +303,14 @@ def main():
     application.add_handler(InlineQueryHandler(inline_query))
     application.add_handler(CallbackQueryHandler(button_callback))
     
-    # Обработчик для команд в группах
+    # Обработчик команд в группах
     application.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & filters.Regex(r'^/whoami'),
-        whoami
+        filters.ChatType.GROUPS & filters.Regex(r'^/(whoami|stats|reset_stats)'),
+        lambda update, context: {
+            'whoami': whoami,
+            'stats': stats,
+            'reset_stats': reset_stats
+        }[update.message.text[1:]](update, context)
     ))
     
     logger.info("Бот запущен и готов к работе!")

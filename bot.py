@@ -290,7 +290,7 @@ def main():
     init_db()
     
     application = Application.builder() \
-        .token("7031109248:AAHjkatNIp9k1SwvrqBBXmz4Anu2TnNT2Nk") \
+        .token("7031109248:AAEi_Eohl5yECvepbv0Ym60mdl_4M2q2IAA") \
         .build()
     
     # Регистрация обработчиков

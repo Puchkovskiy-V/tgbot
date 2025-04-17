@@ -116,7 +116,6 @@ def get_random_option(user_id, username):
     return f"{chosen_option} {emoji}"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
     text = (
         "🤖 <b>Бот характеристик</b>\n\n"
         "Доступные команды:\n"
@@ -125,21 +124,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/reset_stats - Сбросить статистику\n\n"
         "В группе используйте @username_бота для выбора действия"
     )
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=text, parse_mode='HTML')
+    await update.message.reply_text(text, parse_mode='HTML')
 
 async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user = update.effective_user
         response = get_random_option(user.id, user.username)
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"🎯 {user.mention_html()}, ты - {response}",
-            parse_mode='HTML',
-            reply_to_message_id=update.message.message_id if update.message else None
+        await update.message.reply_text(
+            f"🎯 {user.mention_html()}, ты - {response}",
+            parse_mode='HTML'
         )
     except Exception as e:
         logger.error(f"Error in whoami: {e}")
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="⚠️ Произошла ошибка")
+        await update.message.reply_text("⚠️ Произошла ошибка")
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -240,15 +237,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     init_db()
-    # 🔐 Получаем токен из переменной окружения
-    import os
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
+    if not BOT_TOKEN:
+        raise RuntimeError("❌ Переменная окружения BOT_TOKEN не установлена!")
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-if not BOT_TOKEN:
-    raise RuntimeError("❌ Переменная окружения BOT_TOKEN не установлена!")
-
-    application = Application.builder().token(TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("whoami", whoami))

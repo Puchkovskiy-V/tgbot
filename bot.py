@@ -243,7 +243,8 @@ def main():
     # 🔐 Получаем токен из переменной окружения
     import os
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 if not BOT_TOKEN:
     raise RuntimeError("❌ Переменная окружения BOT_TOKEN не установлена!")
 

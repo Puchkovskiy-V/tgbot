@@ -241,9 +241,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     init_db()
     # 🔐 Получаем токен из переменной окружения
-    TOKEN = os.getenv("BOT_TOKEN")
-    if not TOKEN:
-        raise RuntimeError("❌ Переменная окружения BOT_TOKEN не установлена!")
+    import os
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("❌ Переменная окружения BOT_TOKEN не установлена!")
 
     application = Application.builder().token(TOKEN).build()
 
